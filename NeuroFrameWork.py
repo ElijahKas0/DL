@@ -13,6 +13,13 @@ class DenseLayer:
         self.activation = activation
         self.velocity_w = np.zeros_like(self.weights)
         self.velocity_b = np.zeros_like(self.biases)
+        
+         # Для Adam
+        self.m_w = np.zeros_like(self.weights)
+        self.v_w = np.zeros_like(self.weights)
+        self.m_b = np.zeros_like(self.biases)
+        self.v_b = np.zeros_like(self.biases)
+        self.t = 0  # Счетчик шагов
     
     def forward(self, inputs):
         self.inputs = inputs
@@ -20,11 +27,13 @@ class DenseLayer:
         self.a = self.activation.forward(self.z) if self.activation else self.z
         return self.a
     
-    def backward(self, grad_output, learning_rate, optimizer, momentum=0.9, clip_value=1.0):
+    def backward(self, grad_output, learning_rate, optimizer, momentum=0.9, clip_value=1.0, beta1=0.9, beta2=0.999, epsilon=1e-8):
         grad_activation = self.activation.backward(grad_output, self.z) if self.activation else grad_output
         grad_weights = np.dot(self.inputs.T, grad_activation)
         grad_biases = np.sum(grad_activation, axis=0, keepdims=True)
         grad_inputs = np.dot(grad_activation, self.weights.T)
+        
+        # print(f"Layer: {self}, Weight Grad Mean: {np.mean(grad_weights)}, Bias Grad Mean: {np.mean(grad_biases)}")
         
         # Gradient Clipping
         if optimizer == 'gradient_clipping':
@@ -39,6 +48,21 @@ class DenseLayer:
             self.velocity_b = momentum * self.velocity_b - learning_rate * grad_biases
             self.weights += self.velocity_w
             self.biases += self.velocity_b
+        elif optimizer == 'adam':
+            self.t += 1
+            self.m_w = beta1 * self.m_w + (1 - beta1) * grad_weights
+            self.v_w = beta2 * self.v_w + (1 - beta2) * (grad_weights ** 2)
+            self.m_b = beta1 * self.m_b + (1 - beta1) * grad_biases
+            self.v_b = beta2 * self.v_b + (1 - beta2) * (grad_biases ** 2)
+
+            # Bias correction
+            m_w_hat = self.m_w / (1 - beta1 ** self.t)
+            v_w_hat = self.v_w / (1 - beta2 ** self.t)
+            m_b_hat = self.m_b / (1 - beta1 ** self.t)
+            v_b_hat = self.v_b / (1 - beta2 ** self.t)
+
+            self.weights -= learning_rate * m_w_hat / (np.sqrt(v_w_hat) + epsilon)
+            self.biases -= learning_rate * m_b_hat / (np.sqrt(v_b_hat) + epsilon)
         elif optimizer == 'gradient_clipping':
             self.weights -= learning_rate * grad_weights
             self.biases -= learning_rate * grad_biases
@@ -130,10 +154,7 @@ def cross_entropy_loss(y_true, y_pred):
     return -np.sum(y_true * np.log(y_pred + 1e-9)) / m
 
 def cross_entropy_loss_derivative(y_true, y_pred):
-    return y_pred - y_true
-
-
-
+    return (y_pred - y_true) / y_true.shape[0]
 
 # Загрузка датасета Iris
 data = load_iris()
@@ -157,14 +178,14 @@ model.add_layer(DenseLayer(10, 3, activation=Softmax()))
 
 # Обучение модели
 model.train(X_train, y_train, loss_fn=cross_entropy_loss, loss_fn_deriv=cross_entropy_loss_derivative,
-            epochs=100, learning_rate=0.01, optimizer='gradient_clipping', batch_size=16)
+            epochs=170, learning_rate=0.01, optimizer='momentum', batch_size=16)
 
 # Проверка на тестовых данных
 predictions = model.forward(X_test)
 predicted_classes = np.argmax(predictions, axis=1)
 true_classes = np.argmax(y_test, axis=1)
 accuracy = np.mean(predicted_classes == true_classes)
-print(f"Test Accuracy: {accuracy * 100:.2f}%")
+print(f"Test Accuracy(точность) на Iris датасете: {accuracy * 100:.2f}%")
 
 
 
@@ -202,5 +223,4 @@ predictions = model.forward(X_test)
 predicted_classes = np.argmax(predictions, axis=1)
 true_classes = np.argmax(y_test, axis=1)
 accuracy = np.mean(predicted_classes == true_classes)
-print(f"Test Accuracy on MNIST: {accuracy * 100:.2f}%")
-
+print(f"Test Accuracy(точность) на MNIST датасете: {accuracy * 100:.2f}%")
